@@ -1,0 +1,66 @@
+# Example declarative data-quality rules for RecoverAI.
+# Validated before any pipeline is generated or run.
+
+pipeline_id: orders_etl
+schedule: "@daily"
+
+source:
+  name: orders_raw
+  format: csv
+  path: data/orders_raw.csv
+
+schema:
+  expected_columns:
+    order_id:     {type: string,   nullable: false}
+    customer_id:  {type: string,   nullable: false}
+    order_date:   {type: datetime, nullable: false}
+    amount:       {type: float,    nullable: false}
+    country:      {type: string,   nullable: true}
+  on_new_column: flag_as_drift     # flag_as_drift | ignore | fail
+
+checks:
+  - name: null_rate_amount
+    column: amount
+    metric: null_rate
+    threshold: {max: 0.01}
+    severity: critical
+
+  - name: null_rate_country
+    column: country
+    metric: null_rate
+    threshold: {max: 0.10}
+    severity: warning
+
+  - name: duplicate_order_ids
+    column: order_id
+    metric: duplicate_rate
+    threshold: {max: 0.0}
+    severity: critical
+
+  - name: amount_distribution
+    column: amount
+    metric: distribution_shift      # e.g., KS-test / PSI against baseline
+    threshold: {max: 0.2}
+    severity: warning
+
+  - name: row_count_change
+    metric: row_count_change_pct
+    threshold: {min: -30, max: 50}
+    severity: critical
+
+anomaly_detection:
+  model: isolation_forest
+  contamination: 0.02
+  features: [null_rate, duplicate_rate, row_count, runtime_seconds]
+
+recovery:
+  allowed_actions:                  # predefined, reversible only
+    - retry_with_backoff
+    - add_missing_column_with_default
+    - cast_column_type
+    - deduplicate_on_key
+    - quarantine_bad_rows
+    - revert_to_last_good_schema
+  require_sandbox_validation: true
+  rollback_on_failure: true
+  escalate_to: data-team@example.com
